@@ -11,4 +11,7 @@ Quarto.configure do |config|
   config.use :prince
 
   config.source_files = ['hello.org']
+
+  config.stylesheets.font = '"IPAexg", sans-serif'
+  config.add_font( "IPAexg", file: "fonts/ipaexg.ttf" )
 end
