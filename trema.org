@@ -1,0 +1,44 @@
+* Trema 入門
+** OpenFlow プログラミングフレームワーク Trema
+*** セットアップ
+Trema は Linux 上で動作し、Ubuntu 10.04 以降および Debian GNU/Linux
+6.0 の 32 ビットおよび 64 ビット版での動作が保障されています。テストは
+されていませんが、その他の Linux ディストリビューションでも基本的には動
+作するはずです。本連載では、Ubuntu の最新バージョンである 11.04 (デスク
+トップエディション 32 ビット版) を使います。
+
+trema コマンドの実行には root 権限が必要です。まずは、sudo を使って
+root 権限でコマンドを実行できるかどうか、sudo の設定ファイルを確認して
+ください。
+
+#+BEGIN_SRC
+% sudo visudo
+#+END_SRC
+
+sudo ができることを確認したら、Trema が必要とする gcc などの外部ソフト
+ウェアを次のようにインストールします。
+
+#+BEGIN_SRC
+% sudo apt-get install git gcc make ruby ruby-dev libpcap-dev libsqlite3-dev
+#+END_SRC
+
+次に Trema 本体をダウンロードします。Trema は GitHub 上で公開されており、
+git を使って最新版が取得できます。
+
+#+BEGIN_SRC
+% git clone git://github.com/trema/trema.git
+#+END_SRC
+
+Trema のセットアップには、「make install」のようなシステム全体へインス
+トールする手順は不要です。ビルドするだけで使い始めることができます。ビ
+ルドは次のコマンドを実行するだけです。
+
+#+BEGIN_SRC
+% ./trema/build.rb
+#+END_SRC
+
+それでは早速、入門の定番 Hello, Trema! コントローラを Ruby で書いてみま
+しょう。なお、本連載ではおもに Trema の Ruby ライブラリを使ったプログラ
+ミングを取り上げます。C ライブラリを使ったプログラミングの例については、
+Trema の src/examples/ ディレクトリ以下を参照してください。本連載で使っ
+た Ruby コードに加えて、同じ内容の C コードをみつけることができます。
