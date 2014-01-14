@@ -13,5 +13,10 @@ Quarto.configure do |config|
   config.source_files = ['trema.org']
 
   config.stylesheets.font = '"IPAexg", sans-serif'
-  config.add_font( "IPAexg", file: "fonts/ipaexg.ttf" )
+  config.add_font("IPAexg", file: "fonts/ipaexg.ttf")
+  config.add_font("Source Code Pro", file: "fonts/SourceCodePro-Regular.otf")
+  config.add_font(
+    "Source Code Pro",
+    weight: "bold",
+    file: "fonts/SourceCodePro-Bold.otf")
 end
