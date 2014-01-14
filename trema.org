@@ -33,7 +33,7 @@ Trema の実行に必要なのはこれだけです。それでは、Ubuntu の�
 ケージ名を適宜読み替えください。
 
 #+BEGIN_SRC
-% sudo apt-get install git gcc make ruby ruby-dev libpcap-dev libsqlite3-dev
+prompt> sudo apt-get install git gcc make ruby ruby-dev libpcap-dev libsqlite3-dev
 #+END_SRC
 
 以上で Trema をインストールするための準備が整いました。続いて Trema を
@@ -46,7 +46,7 @@ Trema の実行に必要なのはこれだけです。それでは、Ubuntu の�
 Trema は RubyGems を使って次のようにコマンド一発で簡単にインストールできます。
 
 #+BEGIN_SRC
-% gem install trema
+prompt> gem install trema
 #+END_SRC
 
 RubyGems でインストールした場合、自動的に Trema のコマンド trema にパス
@@ -54,7 +54,7 @@ RubyGems でインストールした場合、自動的に Trema のコマンド 
 ルは成功です。
 
 #+BEGIN_SRC
-% trema --version
+prompt> trema --version
 trema version 0.3.0
 #+END_SRC
 
@@ -65,16 +65,16 @@ trema version 0.3.0
 スコードを取得してください。
 
 #+BEGIN_SRC
-% git clone git://github.com/trema/trema.git
+prompt> git clone git://github.com/trema/trema.git
 #+END_SRC
 
 次のコマンドを実行すると、Trema が依存する RubyGems のパッケージが自動
 的にインストールされます。
 
 #+BEGIN_SRC
-% cd trema
-% gem install bundler
-% bundle install
+prompt> cd trema
+prompt> gem install bundler
+prompt> bundle install
 #+END_SRC
 
 次のコマンドで Trema をダウンロードしたディレクトリ以下に Trema がイン
@@ -82,14 +82,14 @@ trema version 0.3.0
 は不要です。
 
 #+BEGIN_SRC
-% ./build.rb
+prompt> ./build.rb
 #+END_SRC
 
 次のコマンドで trema コマンドが正しくインストールされたか確認してくださ
 い。
 
 #+BEGIN_SRC
-% ./trema --version
+prompt> ./trema --version
 trema version 0.3.0
 #+END_SRC
 
