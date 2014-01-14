@@ -10,5 +10,5 @@ Quarto.configure do |config|
   config.use :orgmode
   config.use :prince
 
-  config.source_files = ['hello.org']
+  config.source_files = ['trema.org']
 end

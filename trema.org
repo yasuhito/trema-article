@@ -1,0 +1,100 @@
+* Trema 入門
+** OpenFlow プログラミングフレームワーク Trema
+*** Trema のセットアップ
+Trema は Linux 上で動作します。次のディストリビューションとバージョンで
+の動作を保証しています。
+
+ * Ubuntu 10.04 以降 (i386/amd64, デスクトップ版)
+ * Debian GNU/Linux 6.0 (i386/amd64)
+
+なお公式にサポートはしていませんが、RedHat などその他の代表的な Linux
+ディストリビューションでも動作するはずです。本連載では、Ubuntu の最新バー
+ジョンである 11.04 (デスクトップエディション 32 ビット版) を使います。
+
+Trema の提供する trema コマンドの実行には root 権限が必要です。Trema は
+内部的に、sudo コマンドを使って root 権限でいくつかのコマンドを実行しま
+す。まずは、sudo コマンドを使って root 権限でコマンドを実行できるかどう
+か、sudo の設定ファイルを確認してください。
+
+sudo が正しく設定できていることを確認したら、Trema のインストールや実行
+に必要ないくつかのソフトウェアをインストールしましょう。
+
+ * Ruby インタプリタ。Trema は Ruby と C で作成されていて、アプリケーショ
+   ンの記述にも Ruby を使います。Trema では Ruby のバージョン 1.8.7 が
+   必要です。1.8.6 以前のバージョンやバージョン 1.9 以降では今のところ
+   動作しません。
+ * Ruby のパッケージ管理システム RubyGems (https://rubygems.org/)
+ * Trema 本体。本書は、Trema バージョン 0.3.0 を使用して執筆しています。
+ * Trema のコンパイルに必要な gcc や make、およびいくつかのライブラリ。
+
+Trema の実行に必要なのはこれだけです。それでは、Ubuntu のパッケージ管理
+システム apt-get を使って必要なパッケージを次のようにインストールしてく
+ださい。もし他のディストリビューションを使いたい場合は、コマンド名とパッ
+ケージ名を適宜読み替えください。
+
+#+BEGIN_SRC
+% sudo apt-get install git gcc make ruby ruby-dev libpcap-dev libsqlite3-dev
+#+END_SRC
+
+以上で Trema をインストールするための準備が整いました。続いて Trema を
+インストールするには、RubyGems のパッケージで手軽にインストールする方法
+と、最新のソースコードを取得して自分でビルドする方法があります。それぞ
+れ説明していきましょう。
+
+**** パッケージで手軽にインストールする場合
+
+Trema は RubyGems を使って次のようにコマンド一発で簡単にインストールできます。
+
+#+BEGIN_SRC
+% gem install trema
+#+END_SRC
+
+RubyGems でインストールした場合、自動的に Trema のコマンド trema にパス
+が通っているはずです。次のコマンドでバージョンが表示されればインストー
+ルは成功です。
+
+#+BEGIN_SRC
+% trema --version
+trema version 0.3.0
+#+END_SRC
+
+**** ソースコードから最新版をインストールする場合
+
+最新版をインストールしたい人は、GitHub から自分でソースコードをダウンロー
+ドしてビルドすることもできます。まず、次のように git を使って最新のソー
+スコードを取得してください。
+
+#+BEGIN_SRC
+% git clone git://github.com/trema/trema.git
+#+END_SRC
+
+次のコマンドを実行すると、Trema が依存する RubyGems のパッケージが自動
+的にインストールされます。
+
+#+BEGIN_SRC
+% cd trema
+% gem install bundler
+% bundle install
+#+END_SRC
+
+次のコマンドで Trema をダウンロードしたディレクトリ以下に Trema がイン
+ストールされます。make install のようなシステム全体へのインストール手順
+は不要です。
+
+#+BEGIN_SRC
+% ./build.rb
+#+END_SRC
+
+次のコマンドで trema コマンドが正しくインストールされたか確認してくださ
+い。
+
+#+BEGIN_SRC
+% ./trema --version
+trema version 0.3.0
+#+END_SRC
+
+もし必要あればこのディレクトリにパスを通し、trema コマンドが簡単に起動
+できるようにしておいてください。
+
+さあ、これで Trema による OpenFlow 開発環境が整いました。それでは早速、
+入門の定番 Hello, World を Trema で書いてみましょう。
