@@ -1561,7 +1561,7 @@ OpenFlowネットワークのコントローラが完璧に作られていれば
 よって，この方法は自宅ネットワークなど自由にいじれるネットワーク以外で
 は推奨できません。
 
-*** ③逆流防止パターン
+*** 逆流防止パターン
 最後のパターンは，今までに挙げてきた2つのパターンのいいとこどりです。2
 つのネットワークを接続するのですが，そのときに「逆流防止弁」を付けてパ
 ケットの逆流が起きないようにします（図4）。
@@ -1588,74 +1588,80 @@ Tremaを使って実装してみましょう。
 トを落とします。
 
 *** 実装
-
 逆流防止弁（OneWayBridgeコントローラ）のソースコードをリスト1に示します。
 このコントローラは，packet_inとflow_removedのハンドラを定義しています。
 
 #+BEGIN_SRC ruby
-class OneWayBridge < Controller
+  class OneWayBridge < Controller
+    # 順方向と逆方向のフローを設定する
+    def packet_in datapath_id, message
+      out_port = { 1 => 2, 2 => 1 }[ message.in_port ]
+      add_flow datapath_id, message.macsa, message.in_port, out_port
+      send_packet datapath_id, message, out_port
+      add_drop_flow datapath_id, message.macsa, out_port
+    end
 
-  def packet_in datapath_id, message ← 順方向と逆方向のフローを設定する
-    out_port = { 1 => 2, 2 => 1 }[ message.in_port ]
-    add_flow datapath_id, message.macsa, message.in_port, out_port
-    send_packet datapath_id, message, out_port
-    add_drop_flow datapath_id, message.macsa, out_port
+    # 順方向と逆方向のフローのいずれかが消えたときに，もう1つも消す
+    def flow_removed datapath_id, message
+      delete_flow datapath_id, message.match.dl_src
+    end
+
+    # 以下，プライベートメソッド
+    private
+
+    # 送信元MACアドレスがmacsaで，スイッチポートin_portからout_portへのフローを追加
+    def add_flow datapath_id, macsa, in_port, out_port
+      send_flow_mod_add(
+        datapath_id,
+        :idle_timeout => 10 * 60,
+        :match => Match.new( :in_port => in_port, :dl_src => macsa ),
+        :actions => ActionOutput.new( :port => out_port )
+      )
+    end
+
+    # パケットをスイッチポートout_portへ転送
+    def send_packet datapath_id, message, out_port
+      send_packet_out(
+        datapath_id,
+        :packet_in => message,
+        :actions => ActionOutput.new( :port => out_port )
+      )
+    end
+
+    # 逆流してきたパケットを落とすフローを追加（:actionsを指定していないので，マッチしたパケットを落とす）
+    def add_drop_flow datapath_id, macsa, in_port
+      send_flow_mod_add(
+        datapath_id,
+        :idle_timeout => 10 * 60,
+        :match => Match.new( :in_port => in_port, :dl_src => macsa )
+      )
+    end
+
+    # 順方向と逆方向のフローを両方とも消す
+    def delete_flow datapath_id, macsa
+      send_flow_mod_delete(
+        datapath_id,
+        :match => Match.new( :dl_src => macsa )
+      )
+    end
   end
-
-  def flow_removed datapath_id, message # ← 順方向と逆方向のフローのいずれかが消えたときに，もう1つも消す
-    delete_flow datapath_id, message.match.dl_src
-  end
-
-  private # ← 以下，プライベートメソッド
-
-  def add_flow datapath_id, macsa, in_port, out_port # ← 送信元MACアドレスがmacsaで，スイッチポートin_portからout_portへのフローを追加
-    send_flow_mod_add(
-      datapath_id,
-      :idle_timeout => 10 * 60,
-      :match => Match.new( :in_port => in_port, :dl_src => macsa ),
-      :actions => ActionOutput.new( :port => out_port )
-    )
-  end
-
-  def send_packet datapath_id, message, out_port # ← パケットをスイッチポートout_portへ転送
-    send_packet_out(
-      datapath_id,
-      :packet_in => message,
-      :actions => ActionOutput.new( :port => out_port )
-    )
-  end
-
-  def add_drop_flow datapath_id, macsa, in_port # ← 逆流してきたパケットを落とすフローを追加（:actionsを指定していないので，マッチしたパケットを落とす）
-    send_flow_mod_add(
-      datapath_id,
-      :idle_timeout => 10 * 60,
-      :match => Match.new( :in_port => in_port, :dl_src => macsa )
-    )
-  end
-
-  def delete_flow datapath_id, macsa # ← 順方向と逆方向のフローを両方とも消す
-    send_flow_mod_delete(
-      datapath_id,
-      :match => Match.new( :dl_src => macsa )
-    )
-  end
-end
 #+END_SRC
 
-packet_inハンドラでは，packet_inしたスイッチポートとは別のポートへパケッ
-トを転送するフロー（たとえば，スイッチポート1番から入ってきたパケットは
-スイッチポート2番に転送するフロー）を設定し（add_flowメソッド），実際に
-パケットを転送します（send_packetメソッド）。また，同じパケットが逆向き
-に流れないようにするフローを設定することで逆流を防ぎます
-（add_drop_flowメソッド）。
+Packet In ハンドラ (=packet_in= メソッド) では，Packet In したスイッチ
+ポートとは別のポートへパケットを転送するフロー (たとえば，スイッチポー
+ト 1 番から入ってきたパケットはスイッチポート 2 番に転送するフロー) を
+設定し (=add_flow= メソッド)，実際にパケットを転送します
+(=send_packet= メソッド)。また，同じパケットが逆向きに流れないようにす
+るフローを設定することで逆流を防ぎます (=add_drop_flow= メソッド)。
 
-flow_removedハンドラは，順方向または逆方向のフローが消えたときに呼ばれ
-ます。これらのフローはどちらもdl_srcに同じMACアドレスが指定されているの
-で，delete_flowでもう片方を消します。なおここではやっていませんが，
-flow_removed メッセージに乗ってくる統計情報（注5）を使って，逆流パケッ
-トがあった場合には警告メッセージを出すようにするとさらに効果的でしょう。
+Flow Removed ハンドラ (=flow_removed= メソッド) は，順方向または逆方向
+のフローが消えたときに呼ばれます。これらのフローはどちらも =:dl_src= に
+同じ MAC アドレスが指定されているので =delete_flow= メソッドでもう片方
+を消します。なおここではやっていませんが，Flow Removed メッセージに乗っ
+てくる統計情報[fn:1]を使って，逆流パケットがあった場合には警告メッセー
+ジを出すようにするとさらに効果的でしょう。
 
-注5）第8回の「トラフィック集計スイッチ」でこのテクニックを使いました。
+[fn:1] 「トラフィック集計スイッチ」でこのテクニックを使いました。
 
 *** 実行
 それではさっそく実行してみましょう。実行のためには，レガシーネットワー
