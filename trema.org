@@ -396,301 +396,245 @@ OpenFlow では, お客さんがパケットを発生させるホスト, 電話�
 
 それではしくみの話はこのぐらいにして, より本格的なコントローラの実装に移りましょう. もし途中でわからなくなったら, この節の頭から読み直してください.
 
-* すべての基本,ラーニングスイッチを作ろう
-** 「トラフィック集計スイッチ」 コントローラの概要
-次に,「トラフィック集計付きスイッ
-チ」 を実現するコントローラを実際に作ります.これは OpenFlow の重要な処
-理をすべて含んでいるので,応用するだけでさまざまなタイプのコントローラが
-作れるようになります.最後に,作成したコントローラを Trema の仮想ネットワー
-ク上で実行します.すばらしいことに,Trema を使えば開発から動作テストまで
-を開発マシン 1 台だけで完結できます！
+** まとめ
+電話サポートの例を使って OpenFlow の動作モデルを学びました. パケットの転送はスイッチ上のフローテーブルによって行われ, FlowMod メッセージによって書き換えることができます. また, フローテーブルに登録されていないパケットによって PacketIn メッセージがコントローラに届きます.
 
-トラフィック集計スイッチは,パっと見は普通の L2 スイッチとして動作しま
-す.しかし,裏では各ホストが送信したトラフィックをカウントしており,定
-期的に集計情報を表示してくれます.これを使えば,ネットワークを無駄に使
-いすぎているホストを簡単に特定できます.
+* トラフィック集計スイッチを作ろう
+いよいよ本格的なコントローラとして, 「トラフィック集計機能付きスイッチ」を実現するコントローラを作りましょう. これはパっと見は普通のレイヤ 2 スイッチとして動作します. しかし, 裏では各ホストが送信したトラフィックをカウントしており, 定期的に集計情報を表示してくれます. これを使えば, ネットワークを無駄に使いすぎているホストを簡単に特定できます.
 
-*** 設計と実装
-「L2 スイッチ機能」と「トラフィックの集計機能」のためにはどんな部品が必
-要でしょうか？ まずは,スイッチに指示を出す上司にあたるコントローラクラ
-スが必要です.これを `TrafficMonitor` クラスと名付けましょう.また,パ
-ケットを宛先のスイッチポートへ届けるための `FDB` クラス (注1),あとはト
-ラフィックを集計するための `Counter` クラスの 3 つが最低限必要です.
+しかも, この実装は OpenFlow の重要な処理をすべて含んでいます. 応用すればさまざまなタイプのコントローラが作れるようになります.
 
-注1) FDB とは Forwarding DataBase の略で,スイッチの一般的な機能です.
-詳しくは続く実装で説明します.
+** 設計と実装
+「L2 スイッチ機能」と「トラフィックの集計機能」のためにはどんな部品が必要でしょうか？
 
-**** FDBクラス
-`FDB` クラス (リスト1) は,ホストの MAC アドレスとホストが接続している
-スイッチポートの対応を学習するデータベースです.このデータベースを参照
-することで,`packet_in` メッセージで入ってきたパケットの宛先 MAC アドレ
-スからパケット送信先のスイッチポートを決定できます.
+まずは, スイッチに指示を出す上司にあたるコントローラクラスが必要です. これを TrafficMonitor クラスと名付けましょう. また, パケットを宛先のスイッチポートへ届けるための FDB クラス[fn:fdb], あとはトラフィックを集計するための =Counter= クラスの 3 つが最低限必要です.
 
+[fn:fdb] FDB とは Forwarding DataBase の略で,スイッチの一般的な機能です. 詳しくは続く実装で説明します.
+
+*** FDBクラス
+FDB クラス (リスト [[src:fdb]]) は,ホストの MAC アドレスとホストが接続しているスイッチポートの対応を学習するデータベースです.このデータベースを参照することで, PacketIn メッセージで入ってきたパケットの宛先 MAC アドレスからパケット送信先のスイッチポートを決定できます.
+
+#+CAPTION: MACアドレス→スイッチポートのデータベース FDB クラス (fdb.rb)
+        #+NAME: src:fdb
 #+BEGIN_SRC ruby
-class FDB
-  def initialize
-    @db = {} # <- 連想配列(MACアドレス→スイッチポート番号)
-  end
+  class FDB
+    def initialize
+      # 連想配列 (MACアドレス→スイッチポート番号)
+      @db = {}
+    end
 
-  def lookup mac # <- MACアドレスからスイッチポート番号を引く
-    @db[ mac ]
-  end
+    # MAC アドレスからスイッチポート番号を引く
+    def lookup(mac)
+      @db[ mac ]
+    end
 
-  def learn mac, port_number # <- MACアドレス＋スイッチポートを学習
-    @db[ mac ] = port_number
+    # MAC アドレス＋スイッチポートを学習
+    def learn(mac, port_number)
+      @db[ mac ] = port_number
+    end
   end
-end
 #+END_SRC
 
-リスト1　MACアドレス→スイッチポートのデータベースFDBクラス(fdb.rb)
+*** Counter クラス
+Counter クラス (リスト [[src:counter]]) は, ホスト (MAC アドレスで区別します) ごとの送信パケット数およびバイト数をカウントします. また, カウントした集計情報を表示するためのヘルパメソッドを提供します.
 
-**** Counter クラス
-`Counter` クラス (リスト2) は,ホスト （MAC アドレスで区別します） ごと
-の送信パケット数およびバイト数をカウントします.また,カウントした集計
-情報を表示するためのヘルパメソッドを提供します.
-
+#+CAPTION: トラフィックを記録し集計する Counter クラス (counter.rb)
+        #+NAME: src:counter
 #+BEGIN_SRC ruby
-class Counter
-  def initialize
-    @db = {} # <- ホストごとの集計情報を記録する連想配列
-  end
+  class Counter
+    def initialize
+      # ホストごとの集計情報を記録する連想配列
+      @db = {}
+    end
 
-  def add mac, packet_count, byte_count # <- ホスト (MAC アドレス = mac) の送信パケット数,バイト数を追加
-    @db[ mac ] ||= { :packet_count => 0, :byte_count => 0 }
-    @db[ mac ][ :packet_count ] += packet_count
-    @db[ mac ][ :byte_count ] += byte_count
-  end
+    # ホスト (MAC アドレス = mac) の送信パケット数,バイト数を追加
+    def add(mac, packet_count, byte_count)
+      @db[ mac ] ||= { :packet_count => 0, :byte_count => 0 }
+      @db[ mac ][ :packet_count ] += packet_count
+      @db[ mac ][ :byte_count ] += byte_count
+    end
 
-  def each_pair &block # <- 集計情報の表示用
-    @db.each_pair &block
+    # 集計情報の表示用
+    def each_pair(&block)
+      @db.each_pair &block
+    end
   end
-end
 #+END_SRC
 
-リスト2　トラフィックを記録し集計する `Counter` クラス (`counter.rb`)
+*** TrafficMonitor クラス
+TrafficMonitor クラスはコントローラの本体です (リスト [[src:traffic_monitor]]). メインの処理は次の 3 つになります.
 
-**** TrafficMonitor クラス
-`TrafficMonitor` クラスはコントローラの本体です (リスト3).メインの処理
-はリスト 3 1-3 の 3 つになります.
-
-1. `packet_in` メッセージが到着したとき,パケットを宛先のスイッチポートに転送し,フローテーブルを更新する部分
-2. `flow_removed` メッセージが到着したとき,トラフィック集計情報を更新する部分
+1. PacketIn メッセージが到着したとき, パケットを宛先のスイッチポートに転送し, フローテーブルを更新する部分
+2. FlowRemoved メッセージが到着したとき, トラフィック集計情報を更新する部分
 3. タイマーで 10 秒ごとにトラフィックの集計情報を表示する部分
 
+#+CAPTION: 本体 TrafficMonitor クラス (traffic-monitor.rb)
+        #+NAME: src:traffic_monitor
 #+BEGIN_SRC ruby
-require "counter"
-require "fdb"
+  require "counter"
+  require "fdb"
 
-class TrafficMonitor < Controller
-  periodic_timer_event :show_counter, 10 # (3)
+  class TrafficMonitor < Controller
+    periodic_timer_event :show_counter, 10
 
-  def start
-    @counter = Counter.new # <- Counter オブジェクト
-    @fdb = FDB.new # <- FDB オブジェクト
-  end
+    def start
+      @counter = Counter.new
+      @fdb = FDB.new
+    end
 
-  def packet_in datapath_id, message # (1)
-    macsa = message.macsa # <- パケットを送信したホストの MAC アドレス
-    macda = message.macda # <- パケットの宛先ホストの MAC アドレス
+    # (1) パケットを宛先のスイッチポートに転送し, フローテーブルを更新
+    def packet_in(datapath_id, message)
+      # パケットを送信したホストの MAC アドレス
+      macsa = message.macsa
+      # パケットの宛先ホストの MAC アドレス
+      macda = message.macda
 
-    @fdb.learn macsa, message.in_port
-    @counter.add macsa, 1, message.total_len
-    out_port = @fdb.lookup( macda )
-    if out_port
-      packet_out datapath_id, message, out_port
-      flow_mod datapath_id, macsa, macda, out_port
-    else
-      flood datapath_id, message
+      @fdb.learn macsa, message.in_port
+      @counter.add macsa, 1, message.total_len
+      out_port = @fdb.lookup( macda )
+      if out_port
+        packet_out datapath_id, message, out_port
+        flow_mod datapath_id, macsa, macda, out_port
+      else
+        flood datapath_id, message
+      end
+    end
+
+    # (2) トラフィック集計情報を更新
+    def flow_removed(datapath_id, message)
+      @counter.add message.match.dl_src,message.packet_count, message.byte_count
+    end
+
+    private
+
+    # (3) トラフィックの集計情報を表示
+    def show_counter
+      puts Time.now
+      @counter.each_pair do | mac, counter |
+        puts "#{ mac } #{ counter[ :packet_count ] } packets (#{ counter[ :byte_count ] } bytes)"
+      end
+    end
+
+    # macsa から macda へのパケットを out_port へ転送する FlowMod を打つ
+    def flow_mod(datapath_id, macsa, macda, out_port)
+      send_flow_mod_add(
+        datapath_id,
+        :hard_timeout => 10, # FlowMod の有効期限は10秒
+        :match => Match.new( :dl_src => macsa, :dl_dst => macda ),
+        :actions => Trema::ActionOutput.new( out_port )
+      )
+    end
+
+    # PacketIn したメッセージを out_port へ転送
+    def packet_out(datapath_id, message, out_port)
+      send_packet_out(
+        datapath_id,
+        :packet_in => message,
+        :actions => Trema::ActionOutput.new( out_port )
+      )
+    end
+
+    # PacketIn したメッセージを in_port 以外の全スイッチポートへ転送
+    def flood(datapath_id, message)
+      packet_out datapath_id, message, OFPP_FLOOD
     end
   end
-
-  def flow_removed datapath_id, message # (2)
-    @counter.add message.match.dl_src,message.packet_count, message.byte_count
-  end
-
-  private # <- 以下,プライベートメソッド
-
-  def show_counter # <- カウンタを表示
-    puts Time.now
-    @counter.each_pair do | mac, counter |
-      puts "#{ mac } #{ counter[ :packet_count ] } packets (#{ counter[ :byte_count ] } bytes)"
-    end
-  end
-
-  def flow_mod datapath_id, macsa, macda, out_port # <- macsa から macda へのパケットを out_port へ転送する flow_mod を打つ
-    send_flow_mod_add(
-      datapath_id,
-      :hard_timeout => 10, # <- flow_mod の有効期限は10秒
-      :match => Match.new( :dl_src => macsa, :dl_dst => macda ),
-      :actions => Trema::ActionOutput.new( out_port )
-    )
-  end
-
-  def packet_out datapath_id, message, out_port # <- packet_in したメッセージを out_port へ転送
-    send_packet_out(
-      datapath_id,
-      :packet_in => message,
-      :actions => Trema::ActionOutput.new( out_port )
-    )
-  end
-
-  def flood datapath_id, message # <- packet_inしたメッセージをin_port以外の全スイッチポートへ転送
-    packet_out datapath_id, message, OFPP_FLOOD
-  end
-end
 #+END_SRC
 
-リスト3　本体 `TrafficMonitor` クラス (`traffic-monitor.rb`)
+それでは, とくに重要な (1) の処理を詳しく見ていきましょう. なお, リスト中で使われているメソッドの引数など API の詳細については,「Trema Ruby API ドキュメント」 を参照してください.
 
-それでは,とくに重要な (1) の処理を詳しく見ていきましょう.なお,リスト
-3 中で使われているメソッドの引数など API の詳細については,「Trema
-Ruby API ドキュメント」 を参照してください.
-
-以下の説明では図 3 に示すホスト 2 台 + スイッチ 1 台からなるネットワー
-ク構成を使います.host1 から host2 にパケットを送信したときの動作シーケ
-ンスは図 4 のようになります.
+以下の説明では図 [[fig:traffic_monitor_network]] に示すホスト 2 台 + スイッチ 1 台からなるネットワーク構成を使います. host1 から host2 にパケットを送信したときの動作シーケンスは図 [[fig:sequence]] のようになります.
 
 #+CAPTION: TrafficMonitor を動作させるネットワーク構成の例
-[[https://github.com/trema/Programming-Trema/raw/master/images/2_003.png]]
-図3　`TrafficMonitor` を動作させるネットワーク構成の例
+#+NAME: fig:traffic_monitor_network
+[[./images/traffic_monitor_network.png]]
 
 #+CAPTION: host1からhost2宛にパケットを送信したときの動作シーケンス
-[[https://github.com/trema/Programming-Trema/raw/master/images/2_004.png]]
-図4　`host1` から `host2` 宛にパケットを送信したときの動作シーケンス
+#+NAME: fig:sequence
+[[./images/sequence.png]]
 
-1. `host1` から `host2` を宛先としてパケットを送信すると,まずはスイッ
-   チにパケットが届く
-2. スイッチのフローテーブルは最初はまっさらで,どう処理すればよいかわか
-   らない状態なので,コントローラである `TrafficMonitor` に
-   `packet_in` メッセージを送る
-3. `TrafficMonitor` の `packet_in` メッセージハンドラでは,`packet_in`
-   メッセージの `in_port` (`host1` のつながるスイッチポート) と
-   `host1` の MAC アドレスを FDB に記録する
-4. また,`Counter` に記録された `host1` の送信トラフィックを 1 パケット
-   分増やす
-5. `packet_in` メッセージの宛先 MAC アドレスから転送先のスイッチポート
-   番号を FDB に問い合わせる.この時点では `host2` のスイッチポートは学
-   習していないので,結果は 「不明」
-6. そこで,パケットを `in_port` 以外のすべてのスイッチポートに出力する
-   `packet_out` メッセージ (FLOOD と呼ばれる) をスイッチに送り,
-   `host2` が受信してくれることを期待する
-7. スイッチは,パケットを `in_port` 以外のすべてのポートに出す
+1. host1 から host2 を宛先としてパケットを送信すると,まずはスイッチにパケットが届く
+2. スイッチのフローテーブルは最初はまっさらで, どう処理すればよいかわからない状態なので, コントローラである TrafficMonitor に PacketIn メッセージを送る
+3. TrafficMonitor の PacketIn ハンドラでは, PacketIn メッセージの =in_port= (host1 のつながるスイッチポート) と host1 の MAC アドレスを FDB に記録する
+4. また, Counter に記録された host1 の送信トラフィックを 1 パケット分増やす
+5. PacketIn メッセージの宛先 MAC アドレスから転送先のスイッチポート番号を FDB に問い合わせる. この時点では host2 のスイッチポートは学習していないので, 結果は「不明」
+6. そこで, パケットを =in_port= 以外のすべてのスイッチポートに出力する PacketOut メッセージ (FLOOD と呼ばれる) をスイッチに送り, host2 が受信してくれることを期待する
+7. スイッチは, パケットを =in_port= 以外のすべてのポートに出す
 
-これで,最終的に `host2` がパケットを受信できます.逆に,この状態で
-`host1` を宛先として `host2` からパケットを送信したときの動作シーケンス
-は次のとおりになります (図5).4 までの動作は図 4 と同じですが,5 からの
-動作が次のように異なります.
+これで, 最終的に host2 がパケットを受信できます.逆に,この状態で host1 を宛先として host2 からパケットを送信したときの動作シーケンスは次のとおりになります (図 [[fig:sequence2]]). 4 までの動作は図 [[fig:sequence]] と同じですが, 5 からの動作が次のように異なります.
 
 #+CAPTION: host1 から host2 宛にパケットを送信したときの動作シーケンス
-[[https://github.com/trema/Programming-Trema/raw/master/images/2_005.png]]
-図5　host1 から host2 宛にパケットを送信したときの動作シーケンス
+#+NAME: fig:sequence2
+[[./images/sequence2.png]]
 
-1. `host1` から `host2` を宛先としてパケットを送信すると,まずはスイッ
-   チにパケットが届く
-2. スイッチのフローテーブルは最初はまっさらで,どう処理すればよいかわか
-   らない状態なので,コントローラである `TrafficMonitor` に
-   `packet_in` メッセージを送る
-3. `TrafficMonitor` の `packet_in` メッセージハンドラでは,`packet_in`
-   メッセージの `in_port` (`host1` のつながるスイッチポート) と
-   `host1` の MAC アドレスを FDB に記録する
-4. また,`Counter` に記録された `host1` の送信トラフィックを 1 パケット
-   分増やす
-5. `packet_in` メッセージの宛先 MAC アドレスから,転送先のスイッチポー
-   ト番号を FDB に問い合わせる.これは,先ほど `host1` から `host2` に
-   パケットを送った時点で FDB に学習させているので,送信先はスイッチポー
-   ト 1 番ということがわかる
-6. そこで,`TrafficMonitor` はパケットをスイッチポート 1 番へ出力する
-   `packet_out` メッセージをスイッチに送る.スイッチはこれを受け取ると,
-   パケットをスイッチポート 1 番に出し,最終的に `host1` がパケットを受
-   信する
-7. 「送信元 = 00:00:00:00:00:02,送信先 = 00:00:00:00:00:01 となるパケッ
-   トはスイッチポート 1 番に転送せよ」 という `flow_mod` メッセージをス
-   イッチに送信する
+1. host1 から host2 を宛先としてパケットを送信すると,まずはスイッチにパケットが届く
+2. スイッチのフローテーブルは最初はまっさらで, どう処理すればよいかわからない状態なので, コントローラである TrafficMonitor に PacketIn メッセージを送る
+3. TrafficMonitor の PacketIn ハンドラでは, PacketIn メッセージの =in_port= (host1 のつながるスイッチポート) と host1 の MAC アドレスを FDB に記録する
+4. また, Counter に記録された host1 の送信トラフィックを 1 パケット分増やす
+5. PacketIn メッセージの宛先 MAC アドレスから, 転送先のスイッチポート番号を FDB に問い合わせる. これは, 先ほど host1 から host2 にパケットを送った時点で FDB に学習させているので, 送信先はスイッチポート 1 番ということがわかる
+6. そこで, TrafficMonitor はパケットをスイッチポート 1 番へ出力する PacketOut メッセージをスイッチに送る. スイッチはこれを受け取ると, パケットをスイッチポート 1 番に出し,最終的に host1 がパケットを受信する
+7. 「送信元 = 00:00:00:00:00:02, 送信先 = 00:00:00:00:00:01 となるパケットはスイッチポート 1 番に転送せよ」 という FlowMod メッセージをスイッチに送信する
 
-最後の 7 によって,以降の `host2` から `host1` へのパケットはすべてスイッ
-チ側だけで処理されるようになります.
+最後の 7 によって, 以降の host2 から host1 へのパケットはすべてスイッチ側だけで処理されるようになります.
 
 ** 実行してみよう
 
-それでは,早速実行してみましょう (注2).リスト 4 の内容の仮想ネットワー
-ク設定を `traffic-monitor.conf` として保存し,次のように実行してくださ
-い.
+それでは, 早速実行してみましょう. リスト [[src:traffic_monitor_conf]] の内容の仮想ネットワーク設定を =traffic-monitor.conf= として保存し,次のように実行してください.
 
 #+BEGIN_SRC
 prompt> ./trema run ./traffic-monitor.rb -c ./traffic-monitor.conf
 #+END_SRC
-リスト 4　仮想スイッチ `0xabc` に仮想ホスト `host1`,`host2` を接続する設定
 
+#+CAPTION: 仮想スイッチ 0xabc に仮想ホスト host1, host2 を接続する設定
+#+NAME: src:traffic_monitor_conf
 #+BEGIN_SRC ruby
-vswitch { # <- 仮想スイッチ 0xabc を定義
+#仮想スイッチ0xabcを定義
+vswitch {
   datapath_id 0xabc
 }
 
-vhost ("host1") { # <- 仮想ホスト host1 を定義
+# 仮想ホストhost1を定義
+vhost ("host1") {
   ip "192.168.0.1"
   mac "00:00:00:00:00:01"
 }
 
-vhost ("host2") { # <- 仮想ホスト host2 を定義
+# 仮想ホストhost2を定義
+vhost ("host2") {
   ip "192.168.0.2"
   mac "00:00:00:00:00:02"
 }
 
-link "0xabc", "host1" # <- ホスト host1,host2 をスイッチ 0xabc に接続
+ # ホスト host1,host2 をスイッチ 0xabc に接続
+link "0xabc", "host1"
 link "0xabc", "host2"
 #+END_SRC
 
-実行すると,図 3 に示した仮想ネットワークが構成され,`TrafficMonitor`
-コントローラが起動します.
+実行すると, 図 [[fig:traffic_monitor_network]] に示した仮想ネットワークが構成され, TrafficMonitor コントローラが起動します.
 
-それでは,実際にトラフィックを発生させて集計されるか見てみましょう.
-Trema の `send_packets` コマンドを使うと,仮想ホスト間で簡単にパケット
-を送受信できます.別ターミナルを開き,次のコマンドを入力してください.
+それでは, 実際にトラフィックを発生させて集計されるか見てみましょう. Trema の =send_packets= コマンドを使うと, 仮想ホスト間で簡単にパケットを送受信できます. 別ターミナルを開き, 次のコマンドを入力してください.
 
 #+BEGIN_SRC
-prompt> ./trema send_packets --source host1 --dest host2 --n_pkts 10 --pps 10← host1からhost2宛にパケットを10個送る
-prompt> ./trema send_packets --source host2 --dest host1 --n_pkts 10 --pps 10← host2からhost1宛にパケットを10個送る
+prompt> ./trema send_packets --source host1 --dest host2 --n_pkts 10 --pps 10
+prompt> ./trema send_packets --source host2 --dest host1 --n_pkts 10 --pps 10
 #+END_SRC
 
-`trema run` を実行した元のターミナルに次のような出力が出ていれば成功です(注3).
+これは最初のコマンドで host1 から host2 宛にパケットを10個送り, 次のコマンドで host2 から host1 宛にパケットを10個送る, という操作です.
+
+=trema run= を実行した元のターミナルに次のような出力が出ていれば成功です.
 
 #+BEGIN_SRC
-    ...
-    00:00:00:00:00:01 10 packets (640 bytes)
-    ↑host1からパケットが10個送信された
+...
+00:00:00:00:00:01 10 packets (640 bytes)
+↑host1からパケットが10個送信された
 
-    00:00:00:00:00:02 10 packets (640 bytes)
-    ↑host2からパケットが10個送信された
-    ...
+00:00:00:00:00:02 10 packets (640 bytes)
+↑host2からパケットが10個送信された
+...
 #+END_SRC
-
-注2) Trema のセットアップが済んでいない人は,前回もしくは Trema のドキュ
-メントを参考にセットアップしておいてください.なお,Trema は頻繁に更新
-されていますので,すでにインストールしている人も最新版にアップデートす
-ることをお勧めします.
-
-注3) その他のトラフィック情報も出るかもしれませんが,これは Linux カー
-ネルが送っている IPv6 のパケットなので,`host1`, `host2` とは関係あり
-ません.
 
 ** まとめ
-今回は 「トラフィック集計機能付きスイッチ」 を実現するコントローラを書
-きました.学んだことは次の2つです.
-
-- 電話サポートの例を使って OpenFlow の動作モデルを学びました.パケット
-  の転送はスイッチ上のフローテーブルによって行われ,`flow_mod` メッセー
-  ジによって書き換えることができます.また,フローテーブルに登録されて
-  いないパケットによって `packet_in` メッセージがコントローラに届きます.
-- 仮想ネットワークを使ったコントローラの動作テスト方法を学びました.仮
-  想スイッチと仮想ホストを起動してつなぎ,`send_packets` コマンドを使っ
-  て仮想ホスト間でパケットを送受信することで,コントローラの簡単な動作
-  テストができます.
-
-次回は Trema を使ったテストファースト開発を紹介します.Rails や
-Sinatra を使った Web アジャイル開発ではお馴染みのテストファースト開発で
-すが,もちろん Trema でもサポートしています.とくに OpenFlow コントロー
-ラのように複雑な動作シーケンスを持つソフトウェアの実装には,テストファー
-ストによるインクリメンタルな開発が有効です.
+仮想ネットワークを使ったコントローラの動作テスト方法を学びました. 仮想スイッチと仮想ホストを起動してつなぎ, =send_packets= コマンドを使って仮想ホスト間でパケットを送受信することで, コントローラの簡単な動作テストができます.
 
 * 実践! 生活ネットワークを OpenFlow に移行しよう
 そろそろ独り立ちするときがやってきました.これまで本連載では,OpenFlow
@@ -964,82 +908,3 @@ prompt> ./trema run ./one-way-bridge.rb -c ./one-way-bridge.conf
   最適です
 - 逆流防止弁を実現するOpenFlowコントローラを実装しました.基本的には2つ
   のフローを設定するだけで,簡単に逆流を防止できます
-
-* 付録
-** PacketIn クラスの主なメソッド
-: @<tt>{:data}
-  パケットのデータ全体をバイナリ文字列で返す
-
-: @<tt>{:in_port}
-  パケットが入ってきたスイッチのポート番号を返す
-
-: @<tt>{:total_len}
-  パケットのデータ長を返す
-
-: @<tt>{:buffered?}
-  Packet Inを起こしたパケットがスイッチにバッファされているかどうかを返す
-
-: @<tt>{:macsa}
-  パケットの送信元MACアドレスを返す
-
-: @<tt>{:macda}
-  パケットの宛先MACアドレスを返す
-
-: @<tt>{:ipv4?}
-  パケットがIPv4である場合@<tt>{true}を返す
-
-: @<tt>{:ipv4_saddr}
-  パケットの送信元IPアドレスを返す
-
-: @<tt>{:ipv4_daddr}
-  パケットの宛先IPアドレスを返す
-
-: @<tt>{:tcp?}
-  パケットがTCPである場合@<tt>{true}を返す
-
-: @<tt>{:tcp_src_port}
-  パケットのTCPの送信元ポート番号を返す
-
-: @<tt>{:tcp_dst_port}
-  パケットのTCP宛先ポート番号を返す
-
-: @<tt>{:udp?}
-  パケットがUDPである場合@<tt>{true}を返す
-
-: @<tt>{:udp_src_port}
-  パケットのUDPの送信元ポート番号を返す
-
-: @<tt>{:udp_dst_port}
-  パケットのUDPの宛先ポート番号を返す
-
-: @<tt>{:vtag?}
-  パケットにVLANヘッダが付いている場合@<tt>{true}を返す
-
-: @<tt>{:vlan_vid}
-  VLANのVIDを返す
-
-このようなメソッドは他にもたくさんあります.メソッドの完全なリストや詳
-しい情報を知りたい場合には,@<chap>{openflow_framework_trema}で紹介した
-@<tt>{trema ruby}コマンドで最新のTrema APIドキュメントを参照してくださ
-い.
-** send_packet_out の主なオプション
-: @<tt>{:buffer_id}
-  スイッチでバッファされているパケットのIDを指定する.この値を使うと,
-  スイッチでバッファされているパケットを指定してPacket Outできるので効
-  率が良くなる(ただし,スイッチにバッファされていない時はエラーになる)
-
-: @<tt>{:data}
-  Packet Outするパケットの中身を指定する.もし@<tt>{:buffer_id}オプショ
-  ンが指定されておりスイッチにバッファされたパケットをPacket Outする場
-  合,この値は使われない
-
-: @<tt>{:packet_in}
-  @<tt>{:data}および@<tt>{:in_port} オプションを指定するためのショート
-  カット@<fn>{in_port_option}.@<tt>{packet_in}ハンドラの引数として渡さ
-  れる@<tt>{PacketIn}メッセージを指定する
-
-: @<tt>{:actions}
-  Packet Outのときに実行したいアクションの配列を指定する.アクションが
-  1つの場合は配列でなくてかまわない
-
-footnote[in_port_option][@<tt>{:in_port}オプションは出力ポートに@<tt>{OFPP_TABLE}という特殊なポートを指定したときに使うオプションです.通常はまったく使いませんが,もし知りたい方はTrema Ruby APIを参照してください.]
